@@ -12,11 +12,12 @@ from urlparse import urlparse
 
 class MyWSGIProxyApp(WSGIProxyApp):
     
-    global server_name,http_host
+    global server_name,server_port, http_host
     
     def setup_forwarded_environ(self, environ):
         super(MyWSGIProxyApp, self).setup_forwarded_environ(environ)
         environ['SERVER_NAME'] = server_name
+        environ['SERVER_PORT'] = server_port
         environ['HTTP_HOST'] = http_host
 
     def __call__(self, environ, start_response):
@@ -26,10 +27,12 @@ class MyWSGIProxyApp(WSGIProxyApp):
 def init(settings):
     global http_host
     global server_name
+    global server_port
     if settings['rules_path'] != '':
         if settings['diazo_port'] != '' and settings['content_url'] != '':
-            http_host = urlparse(settings['content_url']).netloc
-            server_name = socket.gethostbyname(http_host)
+            url = urlparse(settings['content_url'])
+            http_host = server_name = url.hostname
+            server_port = url.port
         else:
             raise Exception("Error: arguments can't be empty.")
     else:
