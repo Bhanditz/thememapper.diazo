@@ -7,12 +7,14 @@ from tornado.httpserver import HTTPServer
 from tornado.ioloop import IOLoop
 from tornado import autoreload
 import optparse
-import socket
 from urlparse import urlparse
+
+from wsgiproxy.exactproxy import proxy_exact_request
+
 
 class MyWSGIProxyApp(WSGIProxyApp):
     
-    global server_name,server_port, http_host
+    global server_name, server_port, http_host, rules_base_path
     
     def setup_forwarded_environ(self, environ):
         super(MyWSGIProxyApp, self).setup_forwarded_environ(environ)
@@ -23,11 +25,24 @@ class MyWSGIProxyApp(WSGIProxyApp):
     def __call__(self, environ, start_response):
         environ['REMOTE_ADDR'] = '127.0.0.1'
         return super(MyWSGIProxyApp, self).__call__(environ, start_response)
+
+    def forward_request(self, environ, start_response):
+        # don't forward requests from the diazo middleware rules parser back to 
+        # this app again (e.g., request for rules.xml made during theme compilation)
+        if environ['PATH_INFO'].startswith(rules_base_path):
+            status = '400'  # what's a better status?
+            headers_out = []
+            start_response(status, headers_out)
+            return ['']
+        return proxy_exact_request(environ, start_response)
     
 def init(settings):
     global http_host
     global server_name
     global server_port
+    global rules_base_path
+
+    rules_base_path = settings['rules_path'].split('rules.xml')[0]
     if settings['rules_path'] != '':
         if settings['diazo_port'] != '' and settings['content_url'] != '':
             url = urlparse(settings['content_url'])
@@ -49,6 +64,8 @@ def get_application(settings):
         app.wsgi_app = DiazoMiddleware(MyWSGIProxyApp(settings['content_url']),None,settings['rules_path'],prefix='/thememapper_static',read_network=True,update_content_length=True,debug=True)
         handlers = [
             (r'/thememapper_static/(.*)', StaticFileHandler, {'path': settings['static_path']}),
+            # avoid proxying requests for theme and rules files back to the WSGIContainer (when requested via rules parser i.e., etree)
+            # (r'{}(.*)'.format(settings['static_path']), StaticFileHandler, {'path': settings['static_path']}),
             (r'/(.*)', FallbackHandler, {'fallback': WSGIContainer(app)})
             ]
         return Application(handlers)
